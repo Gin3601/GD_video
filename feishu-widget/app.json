@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "appID": "cli_aab0e9e4e7789bfb",
+  "blockTypeID": "blk_6a3a55f946404bf4e3952809",
+  "projectName": "AI Video Factory",
+  "initialHeight": 520,
+  "contributes": {
+    "addPanel": {
+      "view": "index.html"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "ai-video-factory-feishu-widget",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "NODE_ENV=development webpack serve --config webpack.config.js",
+    "build": "NODE_ENV=production webpack --config webpack.config.js",
+    "opdev:login": "HOME=$PWD/.opdev-home opdev login",
+    "opdev:version": "HOME=$PWD/.opdev-home opdev --version",
+    "upload": "npm run build && HOME=$PWD/.opdev-home opdev upload dist -t Block -v 1.0.0 -d initial"
+  },
+  "devDependencies": {
+    "@lark-opdev/cli": "^3.4.4",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "html-webpack-plugin": "^5.6.3",
+    "mini-css-extract-plugin": "^2.9.2",
+    "style-loader": "^4.0.0",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.0"
+  }
+}
