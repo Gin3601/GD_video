@@ -1,0 +1,33 @@
+services:
+  api:
+    build: .
+    container_name: ai-video-factory-v3
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      EDGE_TTS_VOICE: ${EDGE_TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      DATABASE_URL: sqlite:///./data/ai_video_factory.db
+      MEDIA_ROOT: ./media
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      FFMPEG_BIN: ffmpeg
+      FFPROBE_BIN: ffprobe
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_WEBHOOK_VERIFY_TOKEN: ${FEISHU_WEBHOOK_VERIFY_TOKEN:-}
+      FEISHU_WEBHOOK_ENCRYPT_KEY: ${FEISHU_WEBHOOK_ENCRYPT_KEY:-}
+      FEISHU_BASE_APP_TOKEN: ${FEISHU_BASE_APP_TOKEN:-}
+      FEISHU_TABLE_ID: ${FEISHU_TABLE_ID:-}
+      FEISHU_FIELD_TYPE: ${FEISHU_FIELD_TYPE:-type}
+      FEISHU_FIELD_STYLE: ${FEISHU_FIELD_STYLE:-style}
+      FEISHU_FIELD_DURATION: ${FEISHU_FIELD_DURATION:-duration}
+      FEISHU_FIELD_VIDEO_URL: ${FEISHU_FIELD_VIDEO_URL:-video_url}
+      FEISHU_FIELD_STATUS: ${FEISHU_FIELD_STATUS:-status}
+      FEISHU_FIELD_ERROR: ${FEISHU_FIELD_ERROR:-error}
+    volumes:
+      - ./media:/app/media
+      - ./data:/app/data
+    restart: unless-stopped
