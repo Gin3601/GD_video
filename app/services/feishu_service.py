@@ -6,6 +6,7 @@ from app.models.video_task import VideoTask
 from app.schemas.video import CreateVideoRequest
 from app.services.feishu_client import FeishuClient
 from app.services.job_store import create_task, get_task, update_task
+from app.services.video_generation_service import VideoGenerationService
 
 
 class FeishuWebhookIgnored(Exception):
@@ -27,6 +28,29 @@ class FeishuService:
         if not resolved_app_token or not resolved_table_id:
             raise ValueError("Feishu app_token and table_id are required")
         return resolved_app_token, resolved_table_id
+
+    def parse_record_action(self, fields: dict[str, Any]) -> str:
+        # Returns the action type from a bitable record: 'video' (default) or 'background'.
+        if not settings.feishu_field_action:
+            return "video"
+        raw = self._field_as_text(fields.get(settings.feishu_field_action), default="")
+        return self._normalize_action(raw)
+
+    def _normalize_action(self, value: str) -> str:
+        mapping = {
+            "生成背景": "background",
+            "背景生成": "background",
+            "生成视频背景": "background",
+            "background": "background",
+            "bg": "background",
+            "生成视频": "video",
+            "完整视频": "video",
+            "自动": "video",
+            "video": "video",
+            "auto": "video",
+        }
+        text = value.strip().lower() if value else ""
+        return mapping.get(text, "video")
 
     def verify_webhook_token(self, payload_token: str | None) -> None:
         expected = settings.feishu_webhook_verify_token
@@ -51,14 +75,59 @@ class FeishuService:
             record_id=record_id,
         )
         fields = record.get("fields", {})
+        # 从「视频规格」单选中同时解析 type 和 duration
+        spec_raw = self._field_as_text(fields.get(settings.feishu_field_type), default="")
+        video_type, duration = self._parse_video_spec(spec_raw)
+        # 如果旧的单独 duration 字段仍存在，以规格字段为主
+        if settings.feishu_field_duration:
+            duration = self._field_as_int(fields.get(settings.feishu_field_duration), default=duration)
+
+        style_raw = self._field_as_text(fields.get(settings.feishu_field_style), default="healing")
+        style = self._normalize_style(style_raw)
+
+        # 获取现有字段内容
+        keyword = self._field_as_optional_text(
+            fields.get(settings.feishu_field_background_name)
+            if settings.feishu_field_background_name else None
+        )
+        existing_video_prompt = self._field_as_optional_text(
+            fields.get(settings.feishu_field_video_prompt)
+            if settings.feishu_field_video_prompt else None
+        )
+        existing_script = self._field_as_optional_text(
+            fields.get(settings.feishu_field_script)
+            if settings.feishu_field_script else None
+        )
+
+        # 有关键词/主题时：根据内容同时生成背景提示词+文案（空的部分）
+        final_video_prompt = existing_video_prompt
+        final_script = existing_script
+        if keyword and (not existing_video_prompt or not existing_script):
+            from app.services.llm_service import LLMService
+            generated = await LLMService().generate_fields_from_keyword(
+                keyword=keyword,
+                style=style,
+                duration=duration,
+            )
+            writeback: dict[str, Any] = {}
+            if not existing_video_prompt and settings.feishu_field_video_prompt:
+                final_video_prompt = generated.video_prompt
+                writeback[settings.feishu_field_video_prompt] = generated.video_prompt
+            if not existing_script and settings.feishu_field_script:
+                final_script = generated.script
+                writeback[settings.feishu_field_script] = generated.script
+            if writeback:
+                await self.client.update_bitable_record(
+                    app_token=resolved_app_token,
+                    table_id=resolved_table_id,
+                    record_id=record_id,
+                    fields=writeback,
+                )
+
         request = CreateVideoRequest(
-            type=self._normalize_video_type(
-                self._field_as_text(fields.get(settings.feishu_field_type), default="morning")
-            ),
-            style=self._normalize_style(
-                self._field_as_text(fields.get(settings.feishu_field_style), default="healing")
-            ),
-            duration=self._field_as_int(fields.get(settings.feishu_field_duration), default=30),
+            type=video_type,
+            style=style,
+            duration=duration,
             background_mode=self._normalize_background_mode(
                 self._field_as_text(
                     fields.get(settings.feishu_field_background_mode)
@@ -74,10 +143,8 @@ class FeishuService:
                 fields.get(settings.feishu_field_background_name)
                 if settings.feishu_field_background_name else None
             ),
-            video_prompt=self._field_as_optional_text(
-                fields.get(settings.feishu_field_video_prompt)
-                if settings.feishu_field_video_prompt else None
-            ),
+            video_prompt=final_video_prompt,
+            script=final_script,
         )
         task = create_task(
             request,
@@ -89,6 +156,131 @@ class FeishuService:
         )
         await self.writeback_task_result(task.id)
         return task
+
+    async def create_background_from_record(
+        self,
+        *,
+        record_id: str,
+        app_token: str | None = None,
+        table_id: str | None = None,
+    ) -> dict[str, Any]:
+        # Generates only the AI background video asset and writes the result back to the bitable record.
+        resolved_app_token, resolved_table_id = self.resolve_bitable_config(
+            app_token=app_token,
+            table_id=table_id,
+        )
+
+        record = await self.client.get_bitable_record(
+            app_token=resolved_app_token,
+            table_id=resolved_table_id,
+            record_id=record_id,
+        )
+        fields = record.get("fields", {})
+
+        style = self._normalize_style(
+            self._field_as_text(fields.get(settings.feishu_field_style), default="healing")
+        )
+        spec_raw = self._field_as_text(fields.get(settings.feishu_field_type), default="")
+        _, duration = self._parse_video_spec(spec_raw)
+
+        keyword = self._field_as_optional_text(
+            fields.get(settings.feishu_field_background_name)
+            if settings.feishu_field_background_name else None
+        )
+        video_prompt = self._field_as_optional_text(
+            fields.get(settings.feishu_field_video_prompt)
+            if settings.feishu_field_video_prompt else None
+        )
+
+        # 如果有关键词且提示词为空，用 LLM 根据关键词生成
+        if keyword and not video_prompt:
+            from app.services.llm_service import LLMService
+            generated = await LLMService().generate_fields_from_keyword(
+                keyword=keyword,
+                style=style,
+                duration=duration,
+            )
+            video_prompt = generated.video_prompt
+            # 同时将文案写回表格（如果字段已配置且为空）
+            existing_script = self._field_as_optional_text(
+                fields.get(settings.feishu_field_script)
+                if settings.feishu_field_script else None
+            )
+            if not existing_script and settings.feishu_field_script:
+                await self.client.update_bitable_record(
+                    app_token=resolved_app_token,
+                    table_id=resolved_table_id,
+                    record_id=record_id,
+                    fields={
+                        settings.feishu_field_video_prompt: video_prompt,
+                        settings.feishu_field_script: generated.script,
+                    },
+                )
+
+        prompt = video_prompt or self._default_background_prompt(style)
+
+        # Update record status to processing
+        await self.client.update_bitable_record(
+            app_token=resolved_app_token,
+            table_id=resolved_table_id,
+            record_id=record_id,
+            fields={settings.feishu_field_status: "processing"},
+        )
+
+        try:
+            result = await VideoGenerationService().generate_background_asset(
+                prompt=prompt,
+                output_dir=settings.siliconflow_download_dir,
+                provider_name="siliconflow",
+            )
+
+            bg_url = result.download_url or ""
+            writeback_fields: dict[str, Any] = {
+                settings.feishu_field_status: "background_done",
+            }
+            if settings.feishu_field_background_url:
+                writeback_fields[settings.feishu_field_background_url] = {
+                    "link": bg_url,
+                    "text": "查看背景视频",
+                }
+            if settings.feishu_field_error:
+                writeback_fields[settings.feishu_field_error] = ""
+
+            await self.client.update_bitable_record(
+                app_token=resolved_app_token,
+                table_id=resolved_table_id,
+                record_id=record_id,
+                fields=writeback_fields,
+            )
+
+            return {
+                "action": "background",
+                "status": "completed",
+                "record_id": record_id,
+                "download_url": bg_url,
+                "provider": result.provider,
+                "remote_task_id": result.remote_task_id,
+            }
+        except Exception as exc:
+            await self.client.update_bitable_record(
+                app_token=resolved_app_token,
+                table_id=resolved_table_id,
+                record_id=record_id,
+                fields={
+                    settings.feishu_field_status: "failed",
+                    settings.feishu_field_error: str(exc),
+                },
+            )
+            raise
+
+    def _default_background_prompt(self, style: str) -> str:
+        prompts = {
+            "healing": "清晨阳光洒在平静的湖面上，微风轻轻吹动树叶，治愈系自然风光",
+            "motivational": "破晓时分，金色阳光穿透云层，照亮大地，充满希望与力量",
+            "calm": "安静的清晨，薄雾笼罩山间，溪水缓缓流淌，宁静致远",
+            "cinematic": "电影感清晨，逆光穿过树林，光影斑驳，富有质感的画面",
+        }
+        return prompts.get(style, prompts["healing"])
 
     async def list_records(
         self,
@@ -162,7 +354,7 @@ class FeishuService:
             fields=fields,
         )
 
-    async def create_task_from_webhook_event(self, event: dict[str, Any]) -> VideoTask:
+    async def create_task_from_webhook_event(self, event: dict[str, Any]) -> tuple[VideoTask, str]:
         record_id = self._extract_first(event, ["record_id", "recordId"])
         app_token = self._extract_first(event, ["app_token", "appToken"])
         table_id = self._extract_first(event, ["table_id", "tableId"])
@@ -176,11 +368,25 @@ class FeishuService:
         if not record_id:
             raise FeishuWebhookIgnored("Webhook event does not include a bitable record id")
 
-        return await self.create_task_from_record(
+        # Detect action from the record before creating the task
+        resolved_app_token, resolved_table_id = self.resolve_bitable_config(
+            app_token=app_token,
+            table_id=table_id,
+        )
+        record = await self.client.get_bitable_record(
+            app_token=resolved_app_token,
+            table_id=resolved_table_id,
+            record_id=record_id,
+        )
+        fields = record.get("fields", {})
+        action = self.parse_record_action(fields)
+
+        task = await self.create_task_from_record(
             record_id=record_id,
             app_token=app_token,
             table_id=table_id,
         )
+        return task, action
 
     async def writeback_task_result(self, task_id: str) -> None:
         task = get_task(task_id)
@@ -339,6 +545,22 @@ class FeishuService:
             return int(float(text))
         except ValueError:
             return default
+
+    def _parse_video_spec(self, value: str) -> tuple[str, int]:
+        """从「视频规格」选项值中同时解析出 type 和 duration。
+        例：'短视频 15s' -> ('morning', 15)
+        """
+        mapping = {
+            "短视频 15s": ("morning", 15),
+            "中视频 30s": ("morning", 30),
+            "长视频 60s": ("morning", 60),
+            # 兼容旧格式
+            "短视频": ("morning", 15),
+            "中视频": ("morning", 30),
+            "长视频": ("morning", 60),
+        }
+        text = value.strip()
+        return mapping.get(text, ("morning", 30))
 
     def _normalize_video_type(self, value: str) -> str:
         mapping = {

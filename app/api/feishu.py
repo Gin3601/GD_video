@@ -103,19 +103,62 @@ async def feishu_webhook(
 
     event = payload.event or {}
     try:
-        task = await feishu_service.create_task_from_webhook_event(event)
+        task, action = await feishu_service.create_task_from_webhook_event(event)
     except FeishuWebhookIgnored as exc:
         return FeishuWebhookResponse(ok=True, message=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if action == "background":
+        background_tasks.add_task(
+            _run_background_only,
+            record_id=task.feishu_record_id or "",
+            app_token=task.feishu_app_token,
+            table_id=task.feishu_table_id,
+        )
+        return FeishuWebhookResponse(ok=True, message="Background task created", task_id=task.id)
 
     request = CreateVideoRequest(**task.request_json)
     background_tasks.add_task(pipeline.run, task.id, request)
     return FeishuWebhookResponse(ok=True, message="Task created", task_id=task.id)
 
 
+async def _run_background_only(
+    *,
+    record_id: str,
+    app_token: str | None = None,
+    table_id: str | None = None,
+) -> None:
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        result = await feishu_service.create_background_from_record(
+            record_id=record_id,
+            app_token=app_token,
+            table_id=table_id,
+        )
+        logger.info("action=background_only record_id=%s status=%s", record_id, result.get("status"))
+    except Exception:
+        logger.exception("action=background_only record_id=%s failed", record_id)
+
+
 @router.post("/create-from-record/{record_id}", response_model=FeishuCreateFromRecordResponse)
 async def create_from_record(record_id: str, background_tasks: BackgroundTasks) -> FeishuCreateFromRecordResponse:
+    # Detect action from the record to support both video and background modes.
+    try:
+        record = await feishu_service.get_record(record_id=record_id)
+        fields = record.get("fields", {})
+        action = feishu_service.parse_record_action(fields)
+    except Exception:
+        action = "video"
+
+    if action == "background":
+        background_tasks.add_task(
+            _run_background_only,
+            record_id=record_id,
+        )
+        return FeishuCreateFromRecordResponse(task_id="", status="background_queued", record_id=record_id)
+
     try:
         task = await feishu_service.create_task_from_record(record_id=record_id)
     except Exception as exc:

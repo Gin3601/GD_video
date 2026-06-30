@@ -335,4 +335,5 @@ class SiliconFlowProvider(VideoProvider):
             media_path = Path("media") / relative_path
         except ValueError:
             media_path = output_path
-        return f"{settings.public_base_url.rstrip('/')}/{str(media_path).replace('\\', '/').lstrip('/')}"
+        media_str = str(media_path).replace('\\', '/').lstrip('/')
+        return f"{settings.public_base_url.rstrip('/')}/{media_str}"

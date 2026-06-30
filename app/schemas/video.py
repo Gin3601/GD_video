@@ -13,6 +13,7 @@ class CreateVideoRequest(BaseModel):
     background_url: AnyUrl | None = None
     background_name: str | None = Field(default=None, max_length=80)
     video_prompt: str | None = Field(default=None, max_length=1200)
+    script: str | None = Field(default=None, description="预先生成并写回的文案，如有则跳过 LLM 决策步骤")
 
 
 class CreateVideoResponse(BaseModel):

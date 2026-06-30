@@ -44,16 +44,17 @@ class Settings(BaseSettings):
     feishu_webhook_encrypt_key: str | None = None
     feishu_base_app_token: str | None = None
     feishu_table_id: str | None = None
-    feishu_field_type: str = "type"
-    feishu_field_style: str = "style"
-    feishu_field_duration: str = "duration"
-    feishu_field_video_url: str = "video_url"
-    feishu_field_status: str = "status"
-    feishu_field_error: str = "error"
-    feishu_field_task_id: str | None = None
-    feishu_field_script: str | None = None
-    feishu_field_background_url: str | None = "指定背景视频"
-    feishu_field_background_name: str | None = "素材关键词"
+    feishu_field_type: str = "视频规格"
+    feishu_field_style: str = "风格"
+    feishu_field_duration: str | None = None
+    feishu_field_video_url: str = "视频URL"
+    feishu_field_status: str = "状态"
+    feishu_field_error: str = "错误"
+    feishu_field_task_id: str | None = "后端任务ID"
+    feishu_field_script: str | None = "生成文案"
+    feishu_field_action: str | None = "操作类型"
+    feishu_field_background_url: str | None = "背景视频"
+    feishu_field_background_name: str | None = "主题/关键词"
     feishu_field_background_mode: str | None = "背景生成方式"
     feishu_field_video_prompt: str | None = "AI背景提示词"
 
