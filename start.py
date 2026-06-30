@@ -1,6 +1,6 @@
 """
 一键启动脚本：
-1. 启动 cloudflared 隧道，自动获取公网地址
+1. 启动 cloudflared 命名隧道（固定地址 api.aigin3601.online）
 2. 更新 .env 中的 PUBLIC_BASE_URL
 3. 重启 Docker 容器使配置生效
 4. 持续保持隧道运行（Ctrl+C 退出）
@@ -10,13 +10,15 @@ import subprocess
 import re
 import os
 import sys
-import time
-import threading
 import signal
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(BASE_DIR, ".env")
 CLOUDFLARED = os.path.join(BASE_DIR, "tools", "cloudflared.exe")
+
+# 固定域名（命名隧道绑定，永不变化）
+TUNNEL_NAME = "gd-video"
+FIXED_URL = "https://api.aigin3601.online"
 
 
 def update_env_key(key, value):
@@ -35,39 +37,16 @@ def update_env_key(key, value):
 
 
 def run_cloudflared():
-    """启动 cloudflared，返回 (process, tunnel_url)"""
-    print("[隧道] 正在启动 Cloudflare 隧道...")
+    """启动命名隧道，返回 process"""
+    print(f"[隧道] 正在启动命名隧道 {TUNNEL_NAME}...")
     proc = subprocess.Popen(
-        [CLOUDFLARED, "tunnel", "--url", "http://localhost:8000"],
+        [CLOUDFLARED, "tunnel", "run", TUNNEL_NAME],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
-
-    tunnel_url = None
-    url_event = threading.Event()
-
-    def reader():
-        nonlocal tunnel_url
-        for line in proc.stdout:
-            line = line.rstrip()
-            if line:
-                print(f"[cloudflared] {line}")
-            m = re.search(r"https://[a-z0-9\-]+\.trycloudflare\.com", line)
-            if m and not tunnel_url:
-                tunnel_url = m.group(0)
-                url_event.set()
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-
-    # 等待最多 30 秒获取地址
-    if not url_event.wait(timeout=30):
-        proc.terminate()
-        raise RuntimeError("[错误] 未能在 30 秒内获取隧道地址，请检查网络")
-
-    return proc, tunnel_url
+    return proc
 
 
 def docker_restart():
@@ -86,28 +65,27 @@ def docker_restart():
 
 
 def main():
-    # 1. 启动隧道
-    proc, tunnel_url = run_cloudflared()
+    # 1. 更新 .env（固定地址，无需解析）
+    update_env_key("PUBLIC_BASE_URL", FIXED_URL)
 
-    # 2. 更新 .env
-    update_env_key("PUBLIC_BASE_URL", tunnel_url)
-    print(f"\n✅ 公网地址: {tunnel_url}")
-    print(f"✅ Webhook 地址: {tunnel_url}/api/feishu/webhook\n")
-
-    # 3. 重启容器
+    # 2. 重启容器（让新 .env 生效）
     docker_restart()
+
+    # 3. 启动隧道
+    proc = run_cloudflared()
 
     # 4. 打印最终信息
     print("\n" + "=" * 60)
     print("🚀 服务已启动！")
     print(f"   本地地址  : http://localhost:8000")
-    print(f"   公网地址  : {tunnel_url}")
-    print(f"   Webhook  : {tunnel_url}/api/feishu/webhook")
+    print(f"   公网地址  : {FIXED_URL}")
+    print(f"   Webhook  : {FIXED_URL}/api/feishu/webhook")
     print("=" * 60)
-    print("📋 请将 Webhook 地址填入飞书多维表格自动化配置中")
+    print("📋 飞书 Webhook 地址（永久固定，无需再修改）：")
+    print(f"   {FIXED_URL}/api/feishu/webhook")
     print("   按 Ctrl+C 关闭隧道并停止服务\n")
 
-    # 5. 保持运行，处理退出
+    # 5. 持续输出隧道日志
     def on_exit(signum, frame):
         print("\n[退出] 正在关闭隧道...")
         proc.terminate()
@@ -115,6 +93,11 @@ def main():
 
     signal.signal(signal.SIGINT, on_exit)
     signal.signal(signal.SIGTERM, on_exit)
+
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line:
+            print(f"[cloudflared] {line}")
 
     proc.wait()
 
