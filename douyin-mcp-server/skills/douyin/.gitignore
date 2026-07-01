@@ -1,0 +1,9 @@
+# Override root .gitignore to include JS files in this skill
+!*.js
+!scripts/*.js
+
+# Exclude runtime data
+node_modules/
+douyin-cookies.json
+chrome-user-data/
+package-lock.json

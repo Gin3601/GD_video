@@ -33,7 +33,40 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
+  margin: -14px -14px 12px;
+  padding: 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
+  border-radius: 0 0 14px 14px;
+}
+
+.toolbar .title strong {
+  color: #ffffff;
+}
+
+.toolbar .title span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.toolbar .icon-button {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.toolbar .icon-button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.toolbar .primary-button {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.95);
+  color: #5b3cc4;
+  font-weight: 650;
+}
+
+.toolbar .primary-button:hover {
+  background: #ffffff;
 }
 
 .title {

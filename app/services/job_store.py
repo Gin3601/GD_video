@@ -48,6 +48,22 @@ def get_task(task_id: str) -> VideoTask:
         return task
 
 
+def get_task_by_feishu_record_id(record_id: str) -> VideoTask | None:
+    """按飞书 record_id 查找最新的已完成任务，找不到返回 None。"""
+    from sqlalchemy import select, desc
+    with SessionLocal() as session:
+        stmt = (
+            select(VideoTask)
+            .where(VideoTask.feishu_record_id == record_id)
+            .order_by(desc(VideoTask.created_at))
+            .limit(1)
+        )
+        task = session.execute(stmt).scalar_one_or_none()
+        if task is not None:
+            session.expunge(task)
+        return task
+
+
 def update_task(
     task_id: str,
     *,
@@ -70,6 +86,8 @@ def update_task(
     download_url: str | None = None,
     provider_cost: float | None = None,
     provider_status: str | None = None,
+    douyin_publish_status: str | None = None,
+    douyin_publish_error: str | None = None,
     error: str | None = None,
 ) -> VideoTask:
     with SessionLocal() as session:
@@ -114,6 +132,10 @@ def update_task(
             task.provider_cost = provider_cost
         if provider_status is not None:
             task.provider_status = provider_status
+        if douyin_publish_status is not None:
+            task.douyin_publish_status = douyin_publish_status
+        if douyin_publish_error is not None:
+            task.douyin_publish_error = douyin_publish_error
         if error is not None:
             task.error = error
         session.commit()

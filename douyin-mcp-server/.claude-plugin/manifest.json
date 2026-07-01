@@ -1,0 +1,27 @@
+{
+  "name": "douyin-tools",
+  "version": "2.0.0",
+  "description": "抖音视频上传工具集 - 支持登录、上传和账号管理",
+  "author": "",
+  "license": "MIT",
+  "homepage": "https://github.com/user/douyin-mcp-server",
+  "keywords": [
+    "douyin",
+    "tiktok",
+    "video-upload",
+    "automation"
+  ],
+  "skills": [
+    "skills/douyin-login",
+    "skills/douyin-upload",
+    "skills/douyin-manage"
+  ],
+  "setup": {
+    "install": "cd mcp-server && npm install",
+    "build": "cd mcp-server && npm run build"
+  },
+  "requirements": {
+    "node": ">=18.0.0",
+    "browser": "Chrome or Chromium"
+  }
+}

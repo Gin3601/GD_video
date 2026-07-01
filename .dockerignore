@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+douyin-mcp-server/mcp-server/node_modules/
+douyin-mcp-server/mcp-server/dist/
+douyin-mcp-server/mcp-server/chrome-user-data/
+
+# Git
+.git/
+.gitignore
+
+# Data (mounted at runtime)
+douyin_data/
+data/
+media/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

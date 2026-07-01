@@ -36,6 +36,9 @@ class VideoTask(Base):
     download_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     provider_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     provider_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # --- 抖音发布状态 ---
+    douyin_publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    douyin_publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

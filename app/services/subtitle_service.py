@@ -55,11 +55,11 @@ class SubtitleService:
             item = part.strip()
             if not item:
                 continue
-            if len(item) <= 16:
+            if len(item) <= 10:
                 lines.append(item)
                 continue
-            for start in range(0, len(item), 14):
-                chunk = item[start : start + 14].strip()
+            for start in range(0, len(item), 9):
+                chunk = item[start : start + 9].strip()
                 if chunk:
                     lines.append(chunk)
         if not lines:

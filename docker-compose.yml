@@ -6,7 +6,21 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - ./media:/app/media
       - ./data:/app/data
+      - ./douyin_data:/app/douyin_data
     restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    command: tunnel --config /home/nonroot/.cloudflared/config.yml run
+    volumes:
+      - ${USERPROFILE}/.cloudflared:/home/nonroot/.cloudflared
+      - ./cloudflared-config.yml:/home/nonroot/.cloudflared/config.yml
+    restart: unless-stopped
+    depends_on:
+      - api

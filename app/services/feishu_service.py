@@ -48,6 +48,9 @@ class FeishuService:
             "自动": "video",
             "video": "video",
             "auto": "video",
+            "发布抖音": "publish_douyin",
+            "抖音发布": "publish_douyin",
+            "douyin": "publish_douyin",
         }
         text = value.strip().lower() if value else ""
         return mapping.get(text, "video")
@@ -124,17 +127,37 @@ class FeishuService:
                     fields=writeback,
                 )
 
+        background_mode = self._normalize_background_mode(
+            self._field_as_text(
+                fields.get(settings.feishu_field_background_mode)
+                if settings.feishu_field_background_mode else None,
+                default="random",
+            )
+        )
+        # AI背景模式强制使用siliconflow，避免因未填provider字段而报错
+        provider = "siliconflow" if background_mode == "ai" else "local"
+
+        # --- 抖音发布字段 ---
+        action = self.parse_record_action(fields)
+        publish_douyin = action == "publish_douyin"
+        douyin_title: str | None = None
+        douyin_tags: str | None = None
+        if publish_douyin:
+            douyin_title = self._field_as_optional_text(
+                fields.get(settings.feishu_field_douyin_title)
+                if settings.feishu_field_douyin_title else None
+            )
+            douyin_tags = self._field_as_optional_text(
+                fields.get(settings.feishu_field_douyin_tags)
+                if settings.feishu_field_douyin_tags else None
+            )
+
         request = CreateVideoRequest(
             type=video_type,
             style=style,
             duration=duration,
-            background_mode=self._normalize_background_mode(
-                self._field_as_text(
-                    fields.get(settings.feishu_field_background_mode)
-                    if settings.feishu_field_background_mode else None,
-                    default="random",
-                )
-            ),
+            provider=provider,
+            background_mode=background_mode,
             background_url=self._field_as_url(
                 fields.get(settings.feishu_field_background_url)
                 if settings.feishu_field_background_url else None
@@ -145,6 +168,9 @@ class FeishuService:
             ),
             video_prompt=final_video_prompt,
             script=final_script,
+            publish_douyin=publish_douyin,
+            douyin_title=douyin_title,
+            douyin_tags=douyin_tags,
         )
         task = create_task(
             request,
@@ -224,7 +250,7 @@ class FeishuService:
             app_token=resolved_app_token,
             table_id=resolved_table_id,
             record_id=record_id,
-            fields={settings.feishu_field_status: "processing"},
+            fields={settings.feishu_field_status: "🎨 背景生成中… 65%"},
         )
 
         try:
@@ -236,7 +262,7 @@ class FeishuService:
 
             bg_url = result.download_url or ""
             writeback_fields: dict[str, Any] = {
-                settings.feishu_field_status: "background_done",
+                settings.feishu_field_status: "🌅 背景已就绪 70%",
             }
             if settings.feishu_field_background_url:
                 writeback_fields[settings.feishu_field_background_url] = {
@@ -267,7 +293,7 @@ class FeishuService:
                 table_id=resolved_table_id,
                 record_id=record_id,
                 fields={
-                    settings.feishu_field_status: "failed",
+                    settings.feishu_field_status: "❌ 失败",
                     settings.feishu_field_error: str(exc),
                 },
             )
@@ -438,13 +464,21 @@ class FeishuService:
         )
 
     def _build_writeback_fields(self, task: VideoTask) -> dict[str, Any]:
+        from app.core.task_status import STATUS_LABEL
+        status_label = STATUS_LABEL.get(task.status, task.status)
         fields: dict[str, Any] = {
-            settings.feishu_field_status: task.status,
+            settings.feishu_field_status: status_label,
         }
         if settings.feishu_field_task_id:
             fields[settings.feishu_field_task_id] = task.id
         if settings.feishu_field_script and task.script:
             fields[settings.feishu_field_script] = task.script
+        if task.status == TaskStatus.BACKGROUND_READY and task.download_url:
+            if settings.feishu_field_background_url:
+                fields[settings.feishu_field_background_url] = {
+                    "link": task.download_url,
+                    "text": "AI生成背景",
+                }
         if task.status == TaskStatus.COMPLETED:
             video_url = task.video_url or self._public_url(task.output_path)
             fields[settings.feishu_field_video_url] = {
@@ -453,6 +487,15 @@ class FeishuService:
             }
             if settings.feishu_field_error:
                 fields[settings.feishu_field_error] = ""
+            # 抖音发布状态附加
+            if task.douyin_publish_status == "published":
+                current = fields.get(settings.feishu_field_status, "")
+                fields[settings.feishu_field_status] = f"{current}\n📱 已发布抖音"
+            elif task.douyin_publish_status == "publishing":
+                current = fields.get(settings.feishu_field_status, "")
+                fields[settings.feishu_field_status] = f"{current}\n📤 抖音发布中…"
+            elif task.douyin_publish_status == "failed" and task.douyin_publish_error:
+                fields[settings.feishu_field_error] = f"抖音: {task.douyin_publish_error}"
         elif task.status == TaskStatus.FAILED:
             fields[settings.feishu_field_error] = task.error or "Video generation failed"
         return fields
@@ -461,6 +504,35 @@ class FeishuService:
         if not path:
             return ""
         return f"{settings.public_base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    async def writeback_douyin_meta(
+        self,
+        *,
+        record_id: str,
+        title: str,
+        tags: str,
+        status_text: str,
+        app_token: str | None = None,
+        table_id: str | None = None,
+    ) -> None:
+        """将抖音标题、标签、发布状态写回飞书多维表格。"""
+        resolved_app_token, resolved_table_id = self.resolve_bitable_config(
+            app_token=app_token,
+            table_id=table_id,
+        )
+        fields: dict[str, Any] = {
+            settings.feishu_field_status: status_text,
+        }
+        if settings.feishu_field_douyin_title:
+            fields[settings.feishu_field_douyin_title] = title
+        if settings.feishu_field_douyin_tags:
+            fields[settings.feishu_field_douyin_tags] = tags
+        await self.client.update_bitable_record(
+            app_token=resolved_app_token,
+            table_id=resolved_table_id,
+            record_id=record_id,
+            fields=fields,
+        )
 
     def _is_missing_field_error(self, exc: Exception) -> bool:
         text = str(exc)

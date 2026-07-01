@@ -1,0 +1,7 @@
+tunnel: gd-video
+credentials-file: /home/nonroot/.cloudflared/a09dc6ed-b373-4754-ad24-6c57491196f8.json
+
+ingress:
+  - hostname: api.aigin3601.online
+    service: http://api:8000
+  - service: http_status:404

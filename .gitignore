@@ -37,3 +37,6 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 抖音登录凭证（含 Cookie，禁止推送）
+douyin_data/

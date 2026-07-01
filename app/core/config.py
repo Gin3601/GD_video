@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     ffprobe_bin: str = "ffprobe"
     subtitle_font_file: str | None = None
     subtitle_font_name: str = "Noto Sans CJK SC"
-    subtitle_font_size: int = 16
+    subtitle_font_size: int = 32
 
     feishu_app_id: str | None = None
     feishu_app_secret: str | None = None
@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     feishu_field_background_name: str | None = "主题/关键词"
     feishu_field_background_mode: str | None = "背景生成方式"
     feishu_field_video_prompt: str | None = "AI背景提示词"
+
+    # --- 飞书 → 抖音发布字段 ---
+    feishu_field_douyin_title: str | None = "抖音标题"
+    feishu_field_douyin_tags: str | None = "抖音标签"
+
+    # --- 抖音发布配置 ---
+    douyin_node_bin: str = "node"
+    douyin_upload_script: Path = Path("./douyin-mcp-server/mcp-server/dist/scripts/upload.js")
+    douyin_data_dir: Path = Path("./douyin_data")
+    douyin_headless: bool = True
+    douyin_upload_timeout_seconds: float = 300.0
 
     cors_origins: list[str] = ["*"]
 

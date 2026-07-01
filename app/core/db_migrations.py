@@ -24,6 +24,8 @@ VIDEO_TASK_COLUMNS: dict[str, str] = {
     "download_url": "VARCHAR(1024)",
     "provider_cost": "FLOAT",
     "provider_status": "VARCHAR(32)",
+    "douyin_publish_status": "VARCHAR(32)",
+    "douyin_publish_error": "TEXT",
 }
 
 

@@ -78,6 +78,10 @@ class VideoPipeline:
                 provider_status=ProviderStatus.FINISHED,
             )
             await self._writeback_feishu(task_id)
+
+            # --- 抖音自动发布 ---
+            if request.publish_douyin:
+                await self._publish_to_douyin(task_id=task_id, request=request, video_path=output_path)
         except Exception as exc:
             update_task(
                 task_id,
@@ -119,7 +123,9 @@ class VideoPipeline:
                 model=request.model,
                 task_id=task_id,
             )
-            update_task(task_id, status=TaskStatus.BACKGROUND_READY, progress=70)
+            # 把背景视频的公网 URL 存入 task，写回飞书「背景视频」字段
+            bg_public_url = self._public_media_url(background_path.relative_to(settings.media_root.parent))
+            update_task(task_id, status=TaskStatus.BACKGROUND_READY, progress=70, download_url=bg_public_url)
             await self._writeback_feishu(task_id)
             return background_path
 
@@ -158,6 +164,57 @@ class VideoPipeline:
         # Public URLs point at local storage so third-party provider URLs never reach the frontend.
         normalized_path = str(media_path).replace("\\", "/").lstrip("/")
         return f"{settings.public_base_url.rstrip('/')}/{normalized_path}"
+
+    async def _publish_to_douyin(
+        self,
+        *,
+        task_id: str,
+        request: CreateVideoRequest,
+        video_path: Path,
+    ) -> None:
+        """视频完成后自动发布到抖音，并写回飞书状态。"""
+        from app.services.douyin_service import DouyinPublishError, DouyinService
+        from app.services.feishu_service import FeishuService
+
+        logger = logging.getLogger(__name__)
+        update_task(task_id, douyin_publish_status="publishing")
+        await self._writeback_feishu(task_id)
+
+        title = request.douyin_title or request.background_name or "早安视频"
+        tags: list[str] | None = None
+        if request.douyin_tags:
+            tags = [t.strip() for t in request.douyin_tags.split(",") if t.strip()]
+        description = request.script[:500] if request.script else None
+
+        douyin = DouyinService()
+        try:
+            result = await douyin.publish_video(
+                video_path=video_path,
+                title=title[:55],
+                description=description,
+                tags=tags,
+            )
+        except DouyinPublishError as exc:
+            logger.exception("douyin auto-publish failed task_id=%s", task_id)
+            update_task(task_id, douyin_publish_status="failed", douyin_publish_error=str(exc))
+            # 写回飞书状态
+            if task_id:
+                feishu = FeishuService()
+                await feishu.writeback_task_result(task_id)
+            return
+
+        if result.get("success"):
+            update_task(task_id, douyin_publish_status="published", douyin_publish_error="")
+        else:
+            update_task(
+                task_id,
+                douyin_publish_status="failed",
+                douyin_publish_error=result.get("error", "未知错误"),
+            )
+
+        # 写回飞书（更新状态字段显示抖音发布结果）
+        feishu = FeishuService()
+        await feishu.writeback_task_result(task_id)
 
 
 pipeline = VideoPipeline()

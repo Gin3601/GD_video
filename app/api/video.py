@@ -12,8 +12,11 @@ from app.schemas.video import (
     CreateBackgroundResponse,
     CreateVideoRequest,
     CreateVideoResponse,
+    PublishDouyinRequest,
+    PublishDouyinResponse,
     VideoTaskResponse,
 )
+from app.services.douyin_service import DouyinPublishError, DouyinService
 from app.services.job_store import TaskNotFoundError, create_task, get_task
 from app.services.video_generation_service import VideoGenerationService
 
@@ -129,3 +132,34 @@ async def download_video(task_id: str) -> FileResponse:
         media_type="video/mp4",
         filename=f"{task_id}.mp4",
     )
+
+
+@router.post("/{task_id}/publish-douyin", response_model=PublishDouyinResponse)
+async def publish_to_douyin(task_id: str, payload: PublishDouyinRequest) -> PublishDouyinResponse:
+    """将已完成视频发布到抖音创作者平台。"""
+    try:
+        task = get_task(task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found") from exc
+
+    if task.status != "completed" or not task.output_path:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="视频尚未生成完毕，无法发布")
+
+    output_filename = Path(task.output_path).name
+    video_path = settings.output_dir / output_filename
+
+    douyin = DouyinService()
+    try:
+        result = await douyin.publish_video(
+            video_path=video_path,
+            title=payload.title,
+            description=payload.description,
+            tags=payload.tags,
+        )
+    except DouyinPublishError as exc:
+        logger.exception("douyin publish failed task_id=%s", task_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+
+    return PublishDouyinResponse(**result)

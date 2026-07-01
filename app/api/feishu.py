@@ -1,7 +1,10 @@
-from typing import NoReturn
+from typing import Any, NoReturn
+
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
+from app.core.config import settings
 from app.core.pipeline import pipeline
 from app.schemas.feishu import (
     FeishuChallengeResponse,
@@ -16,6 +19,8 @@ from app.schemas.feishu import (
 from app.schemas.video import CreateVideoRequest
 from app.services.feishu_client import FeishuAPIError, FeishuConfigError
 from app.services.feishu_service import FeishuService, FeishuWebhookIgnored
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -141,6 +146,103 @@ async def _run_background_only(
     except Exception:
         logger.exception("action=background_only record_id=%s failed", record_id)
 
+
+@router.post("/publish-douyin/{record_id}")
+async def publish_to_douyin(
+    record_id: str,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """点击「抖音上传」按鈕触发：自动生成标题/标签并上传视频到抖音。"""
+    background_tasks.add_task(_do_publish_douyin, record_id=record_id)
+    return {"ok": True, "message": "抖音上传已开始，请稍候查看状态字段"}
+
+
+async def _do_publish_douyin(*, record_id: str) -> None:
+    """异步执行抖音发布流程。"""
+    from app.services.douyin_service import DouyinPublishError, DouyinService
+    from app.services.job_store import get_task_by_feishu_record_id
+    from app.services.llm_service import LLMService
+
+    svc = FeishuService()
+
+    # 1. 查找对应的已完成任务
+    task = get_task_by_feishu_record_id(record_id)
+    if task is None or not task.output_path:
+        await svc.writeback_douyin_meta(
+            record_id=record_id,
+            title="",
+            tags="",
+            status_text="❌ 抖音发布失败：找不到已完成视频",
+        )
+        return
+
+    video_path = settings.media_root.parent / task.output_path
+    if not video_path.exists():
+        await svc.writeback_douyin_meta(
+            record_id=record_id,
+            title="",
+            tags="",
+            status_text="❌ 抖音发布失败：视频文件不存在",
+        )
+        return
+
+    # 2. 先写回状态为「发布中」
+    await svc.writeback_douyin_meta(
+        record_id=record_id,
+        title="",
+        tags="",
+        status_text="🧠 AI生成标题中…",
+    )
+
+    # 3. LLM 生成抖音标题和标签
+    script = task.script or ""
+    req_json = task.request_json or {}
+    background_name = req_json.get("background_name")
+    try:
+        title, tags_csv = await LLMService().generate_douyin_meta(
+            script=script,
+            background_name=background_name,
+        )
+    except Exception as exc:
+        logger.exception("douyin meta generation failed record_id=%s", record_id)
+        title = f"早安！{background_name or '每日一句话'}"
+        tags_csv = "早安,正能量,治愈"
+
+    # 4. 写回标题/标签，状态改为「上传中」
+    await svc.writeback_douyin_meta(
+        record_id=record_id,
+        title=title,
+        tags=tags_csv,
+        status_text="📤 抖音上传中…",
+    )
+
+    # 5. 上传视频到抖音
+    tags_list = [t.strip() for t in tags_csv.split(",") if t.strip()]
+    try:
+        result = await DouyinService().publish_video(
+            video_path=video_path,
+            title=title[:55],
+            description=script[:500] if script else None,
+            tags=tags_list or None,
+        )
+        if result.get("published"):
+            final_status = "📱 已发布抖音 ✅"
+        else:
+            final_status = f"❌ 抖音发布失败：{result.get('error', '未知错误')}"
+    except DouyinPublishError as exc:
+        logger.exception("douyin publish failed record_id=%s", record_id)
+        final_status = f"❌ 抖音发布失败：{str(exc)[:100]}"
+    except Exception as exc:
+        logger.exception("douyin publish unexpected error record_id=%s", record_id)
+        final_status = f"❌ 抖音发布失败：{str(exc)[:100]}"
+
+    # 6. 最终状态写回飞书
+    await svc.writeback_douyin_meta(
+        record_id=record_id,
+        title=title,
+        tags=tags_csv,
+        status_text=final_status,
+    )
 
 @router.post("/create-from-record/{record_id}", response_model=FeishuCreateFromRecordResponse)
 async def create_from_record(record_id: str, background_tasks: BackgroundTasks) -> FeishuCreateFromRecordResponse:

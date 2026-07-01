@@ -14,6 +14,10 @@ class CreateVideoRequest(BaseModel):
     background_name: str | None = Field(default=None, max_length=80)
     video_prompt: str | None = Field(default=None, max_length=1200)
     script: str | None = Field(default=None, description="预先生成并写回的文案，如有则跳过 LLM 决策步骤")
+    # --- 抖音发布（内部字段，由飞书操作类型控制） ---
+    publish_douyin: bool = False
+    douyin_title: str | None = Field(default=None, max_length=55)
+    douyin_tags: str | None = Field(default=None, max_length=200, description="逗号分隔标签")
 
 
 class CreateVideoResponse(BaseModel):
@@ -37,6 +41,20 @@ class CreateBackgroundResponse(BaseModel):
     download_url: str | None = None
     provider_cost: float | None = None
     provider_response: dict | None = None
+
+
+class PublishDouyinRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=55)
+    description: str | None = Field(default=None, max_length=500)
+    tags: list[str] | None = Field(default=None, max_length=10)
+
+
+class PublishDouyinResponse(BaseModel):
+    success: bool
+    title: str | None = None
+    published: bool = False
+    status: str | None = None
+    error: str | None = None
 
 
 class VideoTaskResponse(BaseModel):
